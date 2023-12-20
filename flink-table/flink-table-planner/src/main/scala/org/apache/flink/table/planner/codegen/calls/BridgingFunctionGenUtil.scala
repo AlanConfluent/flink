@@ -47,6 +47,8 @@ import org.apache.flink.table.types.logical.utils.LogicalTypeChecks.isCompositeT
 import org.apache.flink.table.types.utils.DataTypeUtils.{isInternal, validateInputDataType, validateOutputDataType}
 import org.apache.flink.util.Preconditions
 
+import AsyncCodeGenerator.DEFAULT_DELEGATING_FUTURE_TERM
+
 import java.util.concurrent.CompletableFuture
 
 import scala.collection.JavaConverters._
@@ -147,6 +149,13 @@ object BridgingFunctionGenUtil {
         skipIfArgsNull)
     } else if (udf.getKind == FunctionKind.ASYNC_TABLE) {
       generateAsyncTableFunctionCall(functionTerm, externalOperands, returnType)
+    } else if (udf.getKind == FunctionKind.ASYNC_SCALAR) {
+      generateAsyncScalarFunctionCall(
+        ctx,
+        functionTerm,
+        externalOperands,
+        returnType,
+        outputDataType)
     } else {
       generateScalarFunctionCall(ctx, functionTerm, externalOperands, outputDataType)
     }
@@ -207,6 +216,28 @@ object BridgingFunctionGenUtil {
          |""".stripMargin
 
     // has no result
+    GeneratedExpression(NO_CODE, NEVER_NULL, functionCallCode, outputType)
+  }
+
+  private def generateAsyncScalarFunctionCall(
+      ctx: CodeGeneratorContext,
+      functionTerm: String,
+      externalOperands: Seq[GeneratedExpression],
+      outputType: LogicalType,
+      outputDataType: DataType): GeneratedExpression = {
+    val converterTerm = ctx.addReusableConverter(outputDataType)
+    val functionCallCode =
+      s"""
+         |${externalOperands.map(_.code).mkString("\n")}
+         |if (${externalOperands.map(_.nullTerm).mkString(" || ")}) {
+         |  $DEFAULT_DELEGATING_FUTURE_TERM.createAsyncFuture($converterTerm).complete(null);
+         |} else {
+         |  $functionTerm.eval(
+         |    $DEFAULT_DELEGATING_FUTURE_TERM.createAsyncFuture($converterTerm),
+         |    ${externalOperands.map(_.resultTerm).mkString(", ")});
+         |}
+         |""".stripMargin
+
     GeneratedExpression(NO_CODE, NEVER_NULL, functionCallCode, outputType)
   }
 
@@ -380,7 +411,9 @@ object BridgingFunctionGenUtil {
       functionName: String): Unit = {
     if (udf.getKind == FunctionKind.TABLE) {
       verifyImplementation(TABLE_EVAL, argumentDataTypes, None, udf, functionName)
-    } else if (udf.getKind == FunctionKind.ASYNC_TABLE) {
+    } else if (
+      udf.getKind == FunctionKind.ASYNC_TABLE || udf.getKind == FunctionKind.ASYNC_SCALAR
+    ) {
       verifyImplementation(
         ASYNC_TABLE_EVAL,
         DataTypes.NULL.bridgedTo(classOf[CompletableFuture[_]]) +: argumentDataTypes,

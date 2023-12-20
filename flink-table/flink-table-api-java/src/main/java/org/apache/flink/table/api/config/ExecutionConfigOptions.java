@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.api.config;
 
+import org.apache.flink.annotation.Experimental;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.docs.Documentation;
@@ -343,6 +344,57 @@ public class ExecutionConfigOptions {
                             "Output mode for asynchronous operations which will convert to {@see AsyncDataStream.OutputMode}, ORDERED by default. "
                                     + "If set to ALLOW_UNORDERED, will attempt to use {@see AsyncDataStream.OutputMode.UNORDERED} when it does not "
                                     + "affect the correctness of the result, otherwise ORDERED will be still used.");
+
+    // ------------------------------------------------------------------------
+    //  Async Scalar Function
+    // ------------------------------------------------------------------------
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Integer> TABLE_EXEC_ASYNC_SCALAR_BUFFER_CAPACITY =
+            key("table.exec.async-scalar.buffer-capacity")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The max number of async i/o operation that the async lookup join can trigger.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Duration> TABLE_EXEC_ASYNC_SCALAR_TIMEOUT =
+            key("table.exec.async-scalar.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(3))
+                    .withDescription(
+                            "The async timeout for the asynchronous operation to complete.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<AsyncOutputMode> TABLE_EXEC_ASYNC_SCALAR_OUTPUT_MODE =
+            key("table.exec.async-scalar.output-mode")
+                    .enumType(AsyncOutputMode.class)
+                    .defaultValue(AsyncOutputMode.ORDERED)
+                    .withDescription(
+                            "Output mode for asynchronous operations which will convert to {@see AsyncDataStream.OutputMode}, ORDERED by default. "
+                                    + "If set to ALLOW_UNORDERED, will attempt to use {@see AsyncDataStream.OutputMode.UNORDERED} when it does not "
+                                    + "affect the correctness of the result, otherwise ORDERED will be still used.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<RetryStrategy> TABLE_EXEC_ASYNC_SCALAR_RETRY_STRATEGY =
+            key("table.exec.async-scalar.retry-strategy")
+                    .enumType(RetryStrategy.class)
+                    .defaultValue(RetryStrategy.FIXED_DELAY)
+                    .withDescription(
+                            "Restart strategy which will be used, FIXED_DELAY by default.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Duration> TABLE_EXEC_ASYNC_SCALAR_RETRY_DELAY =
+            key("table.exec.async-scalar.retry-delay")
+                    .durationType()
+                    .defaultValue(Duration.ofMillis(100))
+                    .withDescription("The delay to wait before trying again.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Integer> TABLE_EXEC_ASYNC_SCALAR_MAX_ATTEMPTS =
+            key("table.exec.async-scalar.max-attempts")
+                    .intType()
+                    .defaultValue(3)
+                    .withDescription("The max number of async retry attempts to make when ");
 
     // ------------------------------------------------------------------------
     //  MiniBatch Options
@@ -690,6 +742,14 @@ public class ExecutionConfigOptions {
          * result, otherwise ORDERED will be still used.
          */
         ALLOW_UNORDERED
+    }
+
+    /** Retry strategy in the case of failure. */
+    @Experimental
+    public enum RetryStrategy {
+
+        /** A fixed delay before retrying again. */
+        FIXED_DELAY
     }
 
     /** Determine if CAST operates using the legacy behaviour or the new one. */

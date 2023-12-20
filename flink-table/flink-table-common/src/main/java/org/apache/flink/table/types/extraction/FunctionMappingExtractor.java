@@ -26,12 +26,17 @@ import org.apache.flink.table.functions.UserDefinedFunction;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.flink.shaded.guava31.com.google.common.reflect.TypeToken;
+
 import javax.annotation.Nullable;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -143,21 +148,10 @@ final class FunctionMappingExtractor extends BaseMappingExtractor {
             boolean allowDataTypeHint) {
         return (extractor, method) -> {
             if (allowDataTypeHint) {
-                final Set<DataTypeHint> dataTypeHints = new HashSet<>();
-                dataTypeHints.addAll(collectAnnotationsOfMethod(DataTypeHint.class, method));
-                dataTypeHints.addAll(
-                        collectAnnotationsOfClass(
-                                DataTypeHint.class, extractor.getFunctionClass()));
-                if (dataTypeHints.size() > 1) {
-                    throw extractionError(
-                            "More than one data type hint found for output of function. "
-                                    + "Please use a function hint instead.");
+                Optional<FunctionResultTemplate> hints = extractHints(extractor, method);
+                if (hints.isPresent()) {
+                    return hints.get();
                 }
-                if (dataTypeHints.size() == 1) {
-                    return FunctionTemplate.createResultTemplate(
-                            extractor.typeFactory, dataTypeHints.iterator().next());
-                }
-                // otherwise continue with regular extraction
             }
             final DataType dataType =
                     DataTypeExtractor.extractFromGeneric(
@@ -167,6 +161,53 @@ final class FunctionMappingExtractor extends BaseMappingExtractor {
                             extractor.getFunctionClass());
             return FunctionResultTemplate.of(dataType);
         };
+    }
+
+    /**
+     * Extraction that uses a generic type variable of a method parameter for producing a {@link
+     * FunctionResultTemplate}.
+     *
+     * <p>If enabled, a {@link DataTypeHint} from method or class has higher priority.
+     */
+    static ResultExtraction createGenericResultExtractionFromMethod(
+            int paramPos, int genericPos, boolean allowDataTypeHint) {
+        return (extractor, method) -> {
+            if (allowDataTypeHint) {
+                Optional<FunctionResultTemplate> hints = extractHints(extractor, method);
+                if (hints.isPresent()) {
+                    return hints.get();
+                }
+            }
+            final DataType dataType =
+                    DataTypeExtractor.extractFromGenericMethodParameter(
+                            extractor.typeFactory,
+                            extractor.getFunctionClass(),
+                            method,
+                            paramPos,
+                            genericPos);
+            return FunctionResultTemplate.of(dataType);
+        };
+    }
+
+    /** Uses hints to extract functional template. */
+    private static Optional<FunctionResultTemplate> extractHints(
+            BaseMappingExtractor extractor, Method method) {
+        final Set<DataTypeHint> dataTypeHints = new HashSet<>();
+        dataTypeHints.addAll(collectAnnotationsOfMethod(DataTypeHint.class, method));
+        dataTypeHints.addAll(
+                collectAnnotationsOfClass(DataTypeHint.class, extractor.getFunctionClass()));
+        if (dataTypeHints.size() > 1) {
+            throw extractionError(
+                    "More than one data type hint found for output of function. "
+                            + "Please use a function hint instead.");
+        }
+        if (dataTypeHints.size() == 1) {
+            return Optional.ofNullable(
+                    FunctionTemplate.createResultTemplate(
+                            extractor.typeFactory, dataTypeHints.iterator().next()));
+        }
+        // otherwise continue with regular extraction
+        return Optional.empty();
     }
 
     /** Verification that checks a method by parameters and return type. */
@@ -203,6 +244,32 @@ final class FunctionMappingExtractor extends BaseMappingExtractor {
                     Stream.concat(Stream.of(argumentClass), signature.stream())
                             .toArray(Class<?>[]::new);
             if (!isInvokable(method, parameters)) {
+                throw createMethodNotFoundError(method.getName(), parameters, null);
+            }
+        };
+    }
+
+    /** Verification that checks a method by parameters including an additional first parameter. */
+    static MethodVerification createGenericParameterWithArgumentAndReturnTypeVerification(
+            Class<?> baseClass, Class<?> argumentClass, int paramPos, int genericPos) {
+        return (method, signature, result) -> {
+            final Class<?>[] parameters =
+                    Stream.concat(Stream.of(argumentClass), signature.stream())
+                            .toArray(Class<?>[]::new);
+
+            Type genericType = method.getGenericParameterTypes()[paramPos];
+            // Trusty library allows to resolve generic types where the type resolves to a type with
+            // generic parameters...
+            genericType = TypeToken.of(baseClass).resolveType(genericType).getType();
+            if (!(genericType instanceof ParameterizedType)) {
+                throw extractionError(
+                        "The method '%s' needs generic parameters for the %d arg.",
+                        method.getName(), paramPos);
+            }
+            Type returnType =
+                    ((ParameterizedType) genericType).getActualTypeArguments()[genericPos];
+            if (!(isInvokable(method, parameters)
+                    && isAssignable(result, (Class<?>) returnType, true))) {
                 throw createMethodNotFoundError(method.getName(), parameters, null);
             }
         };

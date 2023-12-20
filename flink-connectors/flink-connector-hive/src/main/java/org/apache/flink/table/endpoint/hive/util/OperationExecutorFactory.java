@@ -579,6 +579,7 @@ public class OperationExecutorFactory {
     private static int toFunctionResult(FunctionKind kind) {
         switch (kind) {
             case SCALAR:
+            case ASYNC_SCALAR:
             case AGGREGATE:
                 return DatabaseMetaData.functionNoTable;
             case TABLE:

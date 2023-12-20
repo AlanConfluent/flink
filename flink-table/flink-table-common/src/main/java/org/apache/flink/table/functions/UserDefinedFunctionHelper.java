@@ -67,6 +67,8 @@ public final class UserDefinedFunctionHelper {
 
     public static final String SCALAR_EVAL = "eval";
 
+    public static final String ASYNC_SCALAR_EVAL = "eval";
+
     public static final String TABLE_EVAL = "eval";
 
     public static final String AGGREGATE_ACCUMULATE = "accumulate";

@@ -40,6 +40,8 @@ import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.utils.ClassDataTypeConverter;
 import org.apache.flink.types.Row;
 
+import org.apache.flink.shaded.guava31.com.google.common.reflect.TypeToken;
+
 import javax.annotation.Nullable;
 
 import java.lang.reflect.Field;
@@ -152,6 +154,48 @@ public final class DataTypeExtractor {
                 parameter.getParameterizedType(),
                 String.format(
                         " in parameter %d of method '%s' in class '%s'",
+                        paramPos, method.getName(), baseClass.getName()));
+    }
+
+    /**
+     * Extracts a data type from a method parameter by considering surrounding classes and parameter
+     * annotation. This version assumes that the parameter is a generic type, and uses the generic
+     * position type as the extracted data type. For example, if the parameter is a
+     * CompletableFuture<Long> and genericPos is 0, it will extract Long.
+     */
+    public static DataType extractFromGenericMethodParameter(
+            DataTypeFactory typeFactory,
+            Class<?> baseClass,
+            Method method,
+            int paramPos,
+            int genericPos) {
+
+        Type parameterType = method.getGenericParameterTypes()[paramPos];
+        // Trusty library allows to resolve generic types where the type resolves to a type with
+        // generic parameters...
+        parameterType = TypeToken.of(baseClass).resolveType(parameterType).getType();
+        if (!(parameterType instanceof ParameterizedType)) {
+            throw extractionError(
+                    "The method '%s' needs generic parameters for the %d arg.",
+                    method.getName(), paramPos);
+        }
+        final Type genericParameterType =
+                ((ParameterizedType) parameterType).getActualTypeArguments()[genericPos];
+        final Parameter parameter = method.getParameters()[paramPos];
+        final DataTypeHint hint = parameter.getAnnotation(DataTypeHint.class);
+        final DataTypeTemplate template;
+        if (hint != null) {
+            template = DataTypeTemplate.fromAnnotation(typeFactory, hint);
+        } else {
+            template = DataTypeTemplate.fromDefaults();
+        }
+        return extractDataTypeWithClassContext(
+                typeFactory,
+                template,
+                baseClass,
+                genericParameterType,
+                String.format(
+                        " in generic parameter %d of method '%s' in class '%s'",
                         paramPos, method.getName(), baseClass.getName()));
     }
 

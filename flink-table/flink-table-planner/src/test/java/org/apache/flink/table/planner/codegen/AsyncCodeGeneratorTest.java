@@ -1,0 +1,225 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.flink.table.planner.codegen;
+
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.async.AsyncFunction;
+import org.apache.flink.streaming.api.functions.async.ResultFuture;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.catalog.UnresolvedIdentifier;
+import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.functions.AsyncScalarFunction;
+import org.apache.flink.table.planner.calcite.FlinkContext;
+import org.apache.flink.table.planner.calcite.SqlToRexConverter;
+import org.apache.flink.table.planner.utils.JavaScalaConversionUtil;
+import org.apache.flink.table.planner.utils.PlannerMocks;
+import org.apache.flink.table.runtime.generated.GeneratedFunction;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.utils.CatalogManagerMocks;
+
+import com.google.common.collect.ImmutableList;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexNode;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Test for {@link AsyncCodeGenerator}. */
+public class AsyncCodeGeneratorTest {
+
+    private static final RowType INPUT_TYPE =
+            RowType.of(new IntType(), new BigIntType(), new VarCharType());
+
+    private PlannerMocks plannerMocks;
+    private SqlToRexConverter converter;
+
+    private RelDataType tableRowType;
+
+    @BeforeEach
+    public void before() {
+        plannerMocks = PlannerMocks.create();
+        tableRowType =
+                plannerMocks
+                        .getPlannerContext()
+                        .getTypeFactory()
+                        .buildRelNodeRowType(
+                                JavaScalaConversionUtil.toScala(ImmutableList.of("f1", "f2", "f3")),
+                                JavaScalaConversionUtil.toScala(
+                                        ImmutableList.of(
+                                                new IntType(),
+                                                new BigIntType(),
+                                                new VarCharType())));
+        converter =
+                plannerMocks
+                        .getPlanner()
+                        .createToRelContext()
+                        .getCluster()
+                        .getPlanner()
+                        .getContext()
+                        .unwrap(FlinkContext.class)
+                        .getRexFactory()
+                        .createSqlToRexConverter(tableRowType, null);
+
+        plannerMocks
+                .getFunctionCatalog()
+                .registerTemporaryCatalogFunction(
+                        UnresolvedIdentifier.of(
+                                CatalogManagerMocks.DEFAULT_CATALOG,
+                                CatalogManagerMocks.DEFAULT_DATABASE,
+                                "myFunc"),
+                        new AsyncFunc(),
+                        false);
+    }
+
+    @Test
+    public void testStringReturnType() throws Exception {
+        RowData rowData =
+                execute(
+                        "myFunc(f1, f2, f3)",
+                        RowType.of(new VarCharType()),
+                        GenericRowData.of(2, 3L, StringData.fromString("foo")));
+        assertThat(rowData).isEqualTo(GenericRowData.of(StringData.fromString("complete foo 4 6")));
+    }
+
+    @Test
+    public void testTimestampReturnType() throws Exception {
+        RowData rowData =
+                execute(
+                        "myFunc(f2)",
+                        RowType.of(new TimestampType()),
+                        GenericRowData.of(2, 3L, StringData.fromString("foo")));
+        assertThat(rowData).isEqualTo(GenericRowData.of(TimestampData.fromEpochMillis(3)));
+    }
+
+    @Test
+    public void testDecimalReturnType() throws Exception {
+        RowData rowData =
+                execute(
+                        "myFunc(f1)",
+                        RowType.of(new DecimalType()),
+                        GenericRowData.of(2, 3L, StringData.fromString("foo")));
+        assertThat(rowData)
+                .isEqualTo(
+                        GenericRowData.of(
+                                DecimalData.fromBigDecimal(BigDecimal.valueOf(1024), 12, 3)));
+    }
+
+    @Test
+    public void testTwoReturnTypes_passThroughFirst() throws Exception {
+        RowData rowData =
+                execute(
+                        ImmutableList.of("f2", "myFunc(f1, f2, f3)"),
+                        RowType.of(new VarCharType(), new BigIntType()),
+                        GenericRowData.of(2, 3L, StringData.fromString("foo")));
+        assertThat(rowData)
+                .isEqualTo(GenericRowData.of(3L, StringData.fromString("complete foo 4 6")));
+    }
+
+    @Test
+    public void testTwoReturnTypes_passThroughSecond() throws Exception {
+        RowData rowData =
+                execute(
+                        ImmutableList.of("myFunc(f1, f2, f3)", "f2"),
+                        RowType.of(new VarCharType(), new BigIntType()),
+                        GenericRowData.of(2, 3L, StringData.fromString("foo")));
+        assertThat(rowData)
+                .isEqualTo(GenericRowData.of(StringData.fromString("complete foo 4 6"), 3L));
+    }
+
+    private RowData execute(String sqlExpression, RowType resultType, RowData input)
+            throws Exception {
+        return execute(ImmutableList.of(sqlExpression), resultType, input);
+    }
+
+    private RowData execute(List<String> sqlExpressions, RowType resultType, RowData input)
+            throws Exception {
+        List<RexNode> nodes =
+                sqlExpressions.stream()
+                        .map(sql -> converter.convertToRexNode(sql))
+                        .collect(Collectors.toList());
+        GeneratedFunction<AsyncFunction<RowData, RowData>> function =
+                AsyncCodeGenerator.generateFunction(
+                        "name",
+                        INPUT_TYPE,
+                        resultType,
+                        GenericRowData.class,
+                        nodes,
+                        true,
+                        new Configuration(),
+                        Thread.currentThread().getContextClassLoader());
+        AsyncFunction<RowData, RowData> asyncFunction =
+                function.newInstance(Thread.currentThread().getContextClassLoader());
+        TestResultFuture resultFuture = new TestResultFuture();
+        asyncFunction.asyncInvoke(input, resultFuture);
+        Collection<RowData> result = resultFuture.getResult().get();
+        assertThat(result).hasSize(1);
+        return result.iterator().next();
+    }
+
+    public static final class AsyncFunc extends AsyncScalarFunction {
+        public void eval(CompletableFuture<String> f, Integer i, Long l, String s) {
+            f.complete("complete " + s + " " + (i * i) + " " + (2 * l));
+        }
+
+        public void eval(CompletableFuture<Instant> f, Long l) {
+            f.complete(Instant.ofEpochMilli(l));
+        }
+
+        public void eval(
+                @DataTypeHint("DECIMAL(12, 3)") CompletableFuture<BigDecimal> f, Integer i) {
+            f.complete(BigDecimal.valueOf(i).pow(10));
+        }
+    }
+
+    public static final class TestResultFuture implements ResultFuture<RowData> {
+
+        CompletableFuture<Collection<RowData>> data = new CompletableFuture<>();
+
+        @Override
+        public void complete(Collection<RowData> result) {
+            data.complete(result);
+        }
+
+        @Override
+        public void completeExceptionally(Throwable error) {
+            data.completeExceptionally(error);
+        }
+
+        public CompletableFuture<Collection<RowData>> getResult() {
+            return data;
+        }
+    }
+}

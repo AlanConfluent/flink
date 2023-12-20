@@ -70,7 +70,8 @@ class StreamPlanner(
       FlinkRelDistributionTraitDef.INSTANCE,
       MiniBatchIntervalTraitDef.INSTANCE,
       ModifyKindSetTraitDef.INSTANCE,
-      UpdateKindTraitDef.INSTANCE
+      UpdateKindTraitDef.INSTANCE,
+      AsyncOperatorModeTraitDef.INSTANCE
     )
   }
 

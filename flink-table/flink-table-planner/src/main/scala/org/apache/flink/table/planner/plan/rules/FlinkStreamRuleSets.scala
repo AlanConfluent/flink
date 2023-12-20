@@ -382,7 +382,18 @@ object FlinkStreamRuleSets {
     PythonCalcSplitRule.PUSH_CONDITION,
     PythonCalcSplitRule.REWRITE_PROJECT,
     PythonMapRenameRule.INSTANCE,
-    PythonMapMergeRule.INSTANCE
+    PythonMapMergeRule.INSTANCE,
+    AsyncCalcSyncModeRule.SYNC_MODE_CALC_JOIN,
+    AsyncCalcSyncModeRule.SYNC_MODE_JOIN_CALC,
+    AsyncCalcSplitRule.SPLIT_CONDITION_REX_FIELD,
+    AsyncCalcSplitRule.SPLIT_PROJECTION_REX_FIELD,
+    AsyncCalcSplitRule.SPLIT_CONDITION,
+    AsyncCalcSplitRule.SPLIT_PROJECT,
+    AsyncCalcSplitRule.EXPAND_PROJECT,
+    AsyncCalcSplitRule.PUSH_CONDITION,
+    AsyncCalcSplitRule.REWRITE_PROJECT,
+    AsyncCalcSplitRule.NESTED_SPLIT,
+    AsyncCalcSplitRule.ONE_PER_CALC_SPLIT
   )
 
   /** RuleSet to do physical optimize for stream */
@@ -400,6 +411,7 @@ object FlinkStreamRuleSets {
     // calc
     StreamPhysicalCalcRule.INSTANCE,
     StreamPhysicalPythonCalcRule.INSTANCE,
+    StreamPhysicalAsyncCalcRule.INSTANCE,
     // union
     StreamPhysicalUnionRule.INSTANCE,
     // sort
