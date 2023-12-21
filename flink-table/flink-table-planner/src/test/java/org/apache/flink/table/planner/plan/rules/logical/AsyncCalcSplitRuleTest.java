@@ -34,8 +34,8 @@ import org.apache.flink.types.Row;
 
 import com.google.common.collect.ImmutableList;
 import org.apache.calcite.plan.hep.HepMatchOrder;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -44,7 +44,7 @@ public class AsyncCalcSplitRuleTest extends TableTestBase {
 
     private TableTestUtil util = streamTestUtil(TableConfig.getDefault());
 
-    @Before
+    @BeforeEach
     public void setup() {
         FlinkChainedProgram programs = new FlinkChainedProgram<BatchOptimizeContext>();
         programs.addLast(
